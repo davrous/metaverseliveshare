@@ -1,0 +1,67 @@
+{
+    "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.12/MicrosoftTeams.schema.json",
+    "version": "1.0.3",
+    "manifestVersion": "1.12",
+    "id": "48b9eec6-b19a-43ea-b401-192d32dd751b",
+    "packageName": "com.microsoft.teams.metaverseliveshare",
+    "name": {
+        "short": "Metaverse",
+        "full": "Metaverse Live Share"
+    },
+    "developer": {
+        "name": "David Rousset",
+        "mpnId": "",
+        "websiteUrl": "https://www.davrous.com",
+        "privacyUrl": "https://www.example.com/PrivacyStatement",
+        "termsOfUseUrl": "https://www.example.com/TermsOfUse"
+    },
+    "description": {
+        "short": "Metaverse Teams Live Share SDK",
+        "full": "Visiting 3D places together in Microsoft Teams using the Live Share SDK"
+    },
+    "icons": {
+        "outline": "outline.png",
+        "color": "color.png"
+    },
+    "accentColor": "#FFFFFF",
+    "configurableTabs": [
+        {
+            "configurationUrl": "https://YOURURL/?view=config&inTeams=1&load=1",
+            "canUpdateConfiguration": false,
+            "scopes": [
+                "groupchat"
+            ],
+            "context": [
+                "meetingSidePanel",
+                "meetingStage"
+            ]
+        }
+    ],
+    "validDomains": [
+        "*.ngrok.io",
+        "*.azurewebsites.net"
+    ],
+    "authorization": {
+        "permissions": {
+            "orgWide": [],
+            "resourceSpecific": [
+                {
+                    "name": "MeetingStage.Write.Chat",
+                    "type": "Delegated"
+                },
+                {
+                    "name": "ChannelMeetingStage.Write.Group",
+                    "type": "Delegated"
+                },
+                {
+                    "name": "LiveShareSession.ReadWrite.Chat",
+                    "type": "Delegated"
+                },
+                {
+                    "name": "LiveShareSession.ReadWrite.Group",
+                    "type": "Delegated"
+                }
+            ]
+        }
+    }
+}
