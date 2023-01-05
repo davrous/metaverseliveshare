@@ -206,6 +206,8 @@ function renderStage(elem, presence, selected3DScene) {
     
         rect.linkWithMesh(avatar.head);   
         rect.linkOffsetY = -50;
+
+        return rect;
     };
 
     const updateAvatarPositionAndRotation = (userPresence) => {
@@ -230,6 +232,13 @@ function renderStage(elem, presence, selected3DScene) {
             users[userPresence.userId].head.rotation, 
             new BABYLON.Vector3(userPresence.data.cameraRotation._x, userPresence.data.cameraRotation._y, userPresence.data.cameraRotation._z), 0);                           
     };
+
+    const removeAvatar = (userPresence) => {
+        users[userPresence.userId].head.dispose();
+        users[userPresence.userId].body.dispose();
+        users[userPresence.userId].label.dispose();
+        delete users[userPresence.userId];
+    }
 
     const createScene = function () {
             var scene = new BABYLON.Scene(engine);
@@ -281,13 +290,21 @@ function renderStage(elem, presence, selected3DScene) {
                                 users[userPresence.userId] = {};
                                 console.log("new user is broadcasting, creating his local avatar.");
                                 let avatar = createAvatarBody(initialSceneCameraPosition, userPresence, hdrTexture);
-                                createLabelForAvatar(avatar, userPresence, advancedTexture);
+                                let label = createLabelForAvatar(avatar, userPresence, advancedTexture);
 
                                 users[userPresence.userId].body = avatar.body;
                                 users[userPresence.userId].head = avatar.head;
+                                users[userPresence.userId].label = label;
                             }
                             else {
-                                updateAvatarPositionAndRotation(userPresence);
+                                console.dir(userPresence);
+                                if (presence.state === "online") {
+                                    console.log("Existing user.");
+                                    updateAvatarPositionAndRotation(userPresence);
+                                }
+                                else {
+                                    console.log("User has left.");
+                                }
                             }
                         }
                     });
@@ -299,6 +316,14 @@ function renderStage(elem, presence, selected3DScene) {
                     });
 
                     console.log("userId: " + context?.user.id);
+
+                    window.setInterval(() => {
+                        for (var user in users) {
+                            if (presence.getPresenceForUser(user).state === "offline") {
+                                removeAvatar(presence.getPresenceForUser(user));
+                            };
+                        }
+                    }, 2000);
 
                     // Babylon.js event sent everytime the view matrix is changed
                     // Useful to know either a position, a rotation or
@@ -355,8 +380,8 @@ sideBarTemplate["innerHTML"] = `
     <p class="text">Press the 'share to stage' button to share your selected 3D scene to the meeting stage.</p>
     <label for="3dscenes">Scene:</label>
     <select name="3dscenes"" id="3dscenes">
-        <option value="appartment">Appartment</option>
-        <option value="museum">Museum</option>
+        <option value="apartment">Apartment</option>
+        <option value="museum">Museum</option> 
         <option value="wincafe">Windows Café</option>
         <option value="sponza">Sponza</option>
         <option value="hillvalley">Hill Valley</option>
