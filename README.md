@@ -59,4 +59,4 @@ Then open the app in various browsers or tabs to simulate various users. You can
 
 12. Your friends/colleagues invited to the meeting should be able to see your app on stage when they join the meeting.
 
-![image](/src/assets/screenshot3.jpg)
+<video src="https://david.azureedge.net/videos/MetaverseLiveShare.mp4"  controls="controls" style="max-width: 730px;"></video>
