@@ -59,4 +59,6 @@ Then open the app in various browsers or tabs to simulate various users. You can
 
 12. Your friends/colleagues invited to the meeting should be able to see your app on stage when they join the meeting.
 
+Click on the picture below to watch a demo in video:
+
 [![Watch the video](https://img.youtube.com/vi/49hciF7yAjA/maxresdefault.jpg)](https://youtu.be/49hciF7yAjA)
