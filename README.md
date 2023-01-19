@@ -4,6 +4,8 @@ This repository contains a simple app that enables all connected clients to navi
 
 ![image](/src/assets/screenshot1.jpg)
 
+To better understand this demo, you can also watch a 20 min talk I've done during this [M365 Community Call](https://pnp.github.io/blog/microsoft-365-platform-community-call/2023-01-17/). 
+
 ## Requirements
 
 Node 12.17+
