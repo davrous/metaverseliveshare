@@ -44,22 +44,23 @@ Then open the app in various browsers or tabs to simulate various users. You can
 
 ### Test it out
 
-1. Schedule a meeting for testing from calendar in Teams.
-2. Join the meeting.
-3. In the meeting window, tap on **+ Apps** and tap on **Manage apps** in the flyout that opens.
-4. In the **Manage apps** pane, tap on **Upload a custom app**.
+1. Enable the [Developer Preview](https://learn.microsoft.com/en-us/microsoftteams/platform/resources/dev-preview/developer-preview-intro) mode of Microsoft Teams.
+2. Schedule a meeting for testing from calendar in Teams.
+3. Join the meeting.
+4. In the meeting window, tap on **+ Apps** and tap on **Manage apps** in the flyout that opens.
+5. In the **Manage apps** pane, tap on **Upload a custom app**.
     - _Don't see the option to **Upload a custom app?!** Follow [instructions here](https://docs.microsoft.com/en-us/microsoftteams/teams-custom-app-policies-and-settings) to enable custom-apps in your tenant._
-5. Select the zip file you created earlier and upload it.
-6. In the dialog that shows up, tap **Add** to add your sample app into the meeting.
-7. Now, back in the meeting window, tap **+ Apps** again and type the name of your app in the _Find an app_ textbox.
-8. Select the app to activate it in the meeting.
-9. In the configuration dialog, just tap **Save** to add your app into the meeting.
-10. In the side panel, tap the share icon to put your app on the main stage in the meeting.
-11. That's it! You should now see liveshare-metaverse on the meeting stage.
+6. Select the zip file you created earlier and upload it.
+7. In the dialog that shows up, tap **Add** to add your sample app into the meeting.
+8. Now, back in the meeting window, tap **+ Apps** again and type the name of your app in the _Find an app_ textbox.
+9. Select the app to activate it in the meeting.
+10. In the configuration dialog, just tap **Save** to add your app into the meeting.
+11. In the side panel, tap the share icon to put your app on the main stage in the meeting.
+12. That's it! You should now see liveshare-metaverse on the meeting stage.
 
 ![image](/src/assets/screenshot2.jpg)
 
-12. Your friends/colleagues invited to the meeting should be able to see your app on stage when they join the meeting.
+13. Your friends/colleagues invited to the meeting should be able to see your app on stage when they join the meeting.
 
 Click on the picture below to watch a demo in video:
 
