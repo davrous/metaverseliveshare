@@ -8,10 +8,8 @@
 // https://doc.babylonjs.com/setup/starterHTML
 // https://learn.microsoft.com/en-us/microsoftteams/platform/apps-in-teams-meetings/teams-live-share-overview?tabs=javascript 
 
-import { SharedMap } from "fluid-framework";
-import { LivePresence, LiveShareClient, TestLiveShareHost, PresenceState } from "@microsoft/live-share";
+import { LivePresence, LiveShareClient, TestLiveShareHost } from "@microsoft/live-share";
 import { app, pages, meeting, LiveShareHost } from "@microsoft/teams-js";
-import * as microsoftTeams from "@microsoft/teams-js";
 
 const searchParams = new URL(window.location).searchParams;
 const root = document.getElementById("content");
@@ -19,9 +17,6 @@ const root = document.getElementById("content");
 // camera positions & rotations
 const updateFrequencies = 100;
 const framesToCompensate = 1 + updateFrequencies / (1000 / 60);
-
-// Define container schema
-const userDetails = "user-details";
 
 let presence;
 
@@ -33,12 +28,8 @@ const containerSchema = {
     },
 };
 
-// Teams-js Context object
-let context;
 // Details about the current user
 let defaultAvatarInformation;
-let userPrincipalName;
-let name;
 // list of current users connected
 let users = [];
 
@@ -53,34 +44,9 @@ async function start() {
     if (searchParams.get("inTeams")) {
         // Initialize teams app
         await app.initialize();
-
-        // Get our frameContext from context of our app in Teams
-        context = await app.getContext();
-        console.log(
-            `useTeamsContext: received context: ${JSON.stringify(
-                context
-            )}`
-        );
-        if (context.page.frameContext == "meetingStage") {
-            view = "stage";
-        }
-    }
-    // If not hosting in Teams, generating a random user ID for local tests
-    else {
-        context = {};
-        context.user = {
-            id: `user${Math.abs(Math.random() * 999999999)}`,
-        };
     }
 
     defaultAvatarInformation = getRandomAvatar();
-    userPrincipalName =
-           context?.user.userPrincipalName ??
-                `${defaultAvatarInformation.name}@contoso.com`;
-    name = userPrincipalName.split("@")[0];
-
-    console.log("userPrincipalName: " + userPrincipalName);
-    console.log("name: " + name);
 
     // Load the requested view
     switch (view) {
@@ -92,14 +58,10 @@ async function start() {
             break;
         case "stage":
         default:
-            try {
-                const { container } = await joinContainer();
-                presence = container.initialObjects.presence;
-            
-                renderStage(root, presence, selected3DScene);
-            } catch (error) {
-                renderError(root, error);
-            }
+            const { container } = await joinContainer();
+            presence = container.initialObjects.presence;
+        
+            renderStage(root, presence, selected3DScene);
             break;
     }
 }
@@ -190,7 +152,7 @@ function renderStage(elem, presence, selected3DScene) {
     // This label can be seen through walls to easily see where 
     // another user is in the scene
     const createLabelForAvatar = (avatar, userPresence, advancedTexture) => {
-        console.log("Creating label for avatar: " + userPresence.data.name);
+        console.log("Creating label for avatar: " + userPresence.displayName);
         var rect = new BABYLON.GUI.Rectangle();
         rect.width = 0.2;
         rect.height = "40px";
@@ -201,7 +163,7 @@ function renderStage(elem, presence, selected3DScene) {
         advancedTexture.addControl(rect);
     
         var label = new BABYLON.GUI.TextBlock();
-        label.text = userPresence.data.name;
+        label.text = userPresence.displayName;
         rect.addControl(label);
     
         rect.linkWithMesh(avatar.head);   
@@ -310,12 +272,9 @@ function renderStage(elem, presence, selected3DScene) {
                     });
 
                     // Start tracking presence
-                    presence.initialize(context?.user.id, {
-                        name: name,
+                    presence.initialize({
                         picture: defaultAvatarInformation.picture,
                     });
-
-                    console.log("userId: " + context?.user.id);
 
                     window.setInterval(() => {
                         for (var user in users) {
@@ -332,10 +291,9 @@ function renderStage(elem, presence, selected3DScene) {
                         // sending new camera position & rotation updates every 100 ms
                         // to avoid sending too frequent updates over the network
                         if (new Date().getTime() - lastTime >= updateFrequencies && presence.isInitialized) {
-                             presence.updatePresence(PresenceState.online, {
+                             presence.update({
                                 cameraPosition: scene.activeCamera.position,
                                 cameraRotation: scene.activeCamera.rotation,
-                                name: name,
                                 picture: presence.data.picture,
                             });
                             lastTime = new Date().getTime();
@@ -476,4 +434,4 @@ function renderError(elem, error) {
     errorText.textContent = errorTextContent;
 }
 
-start().catch((error) => console.error(error));
+start().catch((error) => renderError(root, error));
