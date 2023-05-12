@@ -8,7 +8,8 @@
 // https://doc.babylonjs.com/setup/starterHTML
 // https://learn.microsoft.com/en-us/microsoftteams/platform/apps-in-teams-meetings/teams-live-share-overview?tabs=javascript 
 
-import { LivePresence, LiveShareClient, TestLiveShareHost } from "@microsoft/live-share";
+import { LivePresence, LiveShareClient, TestLiveShareHost, LiveState } from "@microsoft/live-share";
+import { InkingManager, LiveCanvas, InkingTool, fromCssColor } from "@microsoft/live-share-canvas";
 import { app, pages, meeting, LiveShareHost } from "@microsoft/teams-js";
 
 const searchParams = new URL(window.location).searchParams;
@@ -19,17 +20,40 @@ const updateFrequencies = 100;
 const framesToCompensate = 1 + updateFrequencies / (1000 / 60);
 
 let presence;
+let canvas;
+let scene;
+let liveCanvas;
+let presenterMode;
+let takeControl;
+let toggleInking;
+
+let inkingEnabled = false;
+let remoteControlled = false;
+let takingControl = false;
+
+let inkingHostElement;
+let inkingManager;
+let inkingButton;
+let initialSceneCameraPosition;
+let hdrTexture;
+let advancedTexture;
+let lastTime;
+// Details about the current user
+let defaultAvatarInformation;
+let currentCameraPosition;
+let currentCameraRotation;
 
 // Using LivePresence object to share avatar states
 // https://learn.microsoft.com/en-us/microsoftteams/platform/apps-in-teams-meetings/teams-live-share-capabilities?tabs=javascript#livepresence-example
 const containerSchema = {
     initialObjects: {
         presence: LivePresence,
+        liveCanvas: LiveCanvas,
+        takeControl: LiveState,
+        toggleInking: LiveState, 
     },
 };
 
-// Details about the current user
-let defaultAvatarInformation;
 // list of current users connected
 let users = [];
 
@@ -60,7 +84,14 @@ async function start() {
         default:
             const { container } = await joinContainer();
             presence = container.initialObjects.presence;
-        
+            liveCanvas = container.initialObjects.liveCanvas;
+            takeControl = container.initialObjects.takeControl;
+            toggleInking = container.initialObjects.toggleInking;
+
+            // Set a default value and start listening for changes
+            await takeControl.initialize(false); 
+            await toggleInking.initialize(false);
+            
             renderStage(root, presence, selected3DScene);
             break;
     }
@@ -84,26 +115,297 @@ const stageTemplate = document.createElement("template");
 
 stageTemplate["innerHTML"] = `
   <style>
+    #content {
+        display: grid;
+    }
     #renderCanvas {
         width: 100%;
         height: 100%;
         touch-action: none;
     }
+    #inkingHost {
+        height: 100%;
+    }
+    #renderCanvas, #inkingHost {
+        grid-column: 1;
+        grid-row: 1; 
+    }
   </style>
-  <canvas id="renderCanvas"></canvas>
+  <canvas id="renderCanvas">
+  </canvas>
+  <div id="inkingHost"></div>
+  <div id="controlButtons">
+    <button id="takeCamControl">Take Camera Control</button>
+    <button id="toggleInking">Start Inking</button>
+    <label for="pen-color">Select a color:</label>
+    <input type="color" id="color" name="color" value="#000000" />
+  </div>
 `;
 
-function renderStage(elem, presence, selected3DScene) {
+async function initializeInkingFeatures() {
+    // Get the canvas host element
+    inkingHostElement = document.getElementById("inkingHost");
+    inkingManager = new InkingManager(inkingHostElement);
+
+    // Begin synchronization for LiveCanvas
+    await liveCanvas.initialize(inkingManager);
+    inkingManager.activate();
+    // Hiding the inking host element by default
+    inkingHostElement.style.display = "none";
+
+    let takeCamControlButton = document.getElementById("takeCamControl");
+    takeCamControlButton.onclick = () => {
+        takingControl = !takingControl;
+        takeControl.set(takingControl);
+        takeCamControlButton.innerHTML = takingControl ? "Release Camera Control" : "Take Camera Control";
+        inkingButton.disabled = !takingControl;
+        if (!takingControl && inkingEnabled) {
+            inkingButton.onclick();
+        }
+    };
+
+    let inkingButton = document.getElementById("toggleInking");
+    inkingButton.disabled = true;
+    inkingButton.onclick = () => {
+        inkingEnabled = !inkingEnabled;
+        toggleInking.set(inkingEnabled);
+        inkingButton.innerHTML = inkingEnabled ? "Stop Inking" : "Start Inking";
+        displayInkingHostElement();
+    };
+
+    // display the inking host element to allow drawing only when the presenter mode is enabled
+    function displayInkingHostElement() {
+        inkingManager.clear();
+        inkingHostElement.style.display = inkingHostElement.style.display === "none" ? "block" : "none";
+    }
+
+    // Change the selected color for pen
+    document.getElementById("color").onchange = () => {
+        const colorPicker = document.getElementById("color");
+        inkingManager.penBrush.color = fromCssColor(colorPicker.value);
+    };
+
+    takeControl.on("stateChanged", (status, local) => {
+        if(!local) {
+            takeCamControlButton.disabled = status;
+            remoteControlled = status;
+
+            // Someone is now taking control your camera
+            if (remoteControlled) {
+                currentCameraPosition = scene.activeCamera.position.clone();
+                currentCameraRotation = scene.activeCamera.rotation.clone();
+                // Removing input focus from the canvas to avoid moving the camera
+                scene.activeCamera.detachControl(canvas); 
+            }
+            else {
+                scene.activeCamera.position = currentCameraPosition;
+                scene.activeCamera.rotation = currentCameraRotation;
+                // Re-attaching input focus to the canvas to allow moving the camera
+                scene.activeCamera.attachControl(canvas);
+            }
+        }
+    });
+
+    toggleInking.on("stateChanged", (status, local) => {
+        if (status !== inkingEnabled) {
+            displayInkingHostElement();
+            inkingEnabled = status;
+        }
+    });
+}
+
+async function renderStage(elem, presence, selected3DScene) {
     elem.appendChild(stageTemplate.content.cloneNode(true));
 
-    console.log("STAGE. Selected 3D scene: " + selected3DScene);
+    initializeInkingFeatures();
 
     let selectedSceneToRender = selected3DScene;
-    let canvas = document.getElementById("renderCanvas");
+    canvas = document.getElementById("renderCanvas");
 
     // Generate the BABYLON 3D engine
     // To know more: https://doc.babylonjs.com/setup/starterHTML
     const engine = new BABYLON.Engine(canvas, true, { disableWebGL2Support: true }); 
+
+    const createScene = function () {
+            var scene = new BABYLON.Scene(engine);
+            lastTime = new Date().getTime();
+            var baseURL;
+            var sceneFile;
+            advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+            hdrTexture = new BABYLON.HDRCubeTexture("https://playground.babylonjs.com/textures/room.hdr", scene, 512);
+
+            switch (selectedSceneToRender) {
+                case "museum":
+                    baseURL = "https://www.babylonjs.com/Scenes/Espilit/";
+                    sceneFile = "Espilit.babylon";
+                    break;
+                case "wincafe":
+                    baseURL = "https://www.babylonjs.com/Scenes/WCafe/";
+                    sceneFile = "WCafe.babylon";
+                    break;
+                case "sponza":
+                        baseURL = "https://www.babylonjs.com/Scenes/Sponza/";
+                        sceneFile = "Sponza.babylon";
+                        break;
+                case "hillvalley":
+                            baseURL = "https://www.babylonjs.com/Scenes/HillValley/";
+                            sceneFile = "HillValley.incremental.babylon";
+                            break;
+                case "appartment":
+                default:
+                    baseURL = "https://www.babylonjs.com/Scenes/flat2009/";
+                    sceneFile = "flat2009.babylon";
+                    break;
+            }
+
+            // https://playground.babylonjs.com/#ZAUBTN
+            BABYLON.SceneLoader.Append(baseURL, sceneFile, scene, () => {
+                if (scene.activeCamera) {
+                    scene.activeCamera.ellipsoid = new BABYLON.Vector3(0.1, 0.6, 0.1);
+                    scene.activeCamera.position.y = 1.2;
+                    initialSceneCameraPosition = scene.activeCamera.position.clone();
+                    scene.activeCamera.attachControl(canvas);
+                    initializePresenceLogic(scene);
+                }
+            });
+            return scene;
+    };
+
+    function initializePresenceLogic() {
+        // Start tracking presence
+        presence.initialize({
+            picture: defaultAvatarInformation.picture,
+        });
+
+        liveCanvas.onGetLocalUserInfo = () => {
+            return {
+              displayName: defaultAvatarInformation.name
+            };
+          };
+
+        liveCanvas.isCursorShared = true;
+
+        // Babylon.js event sent everytime the view matrix is changed
+        // Useful to know either a position, a rotation or
+        // both have been updated
+        scene.activeCamera.onViewMatrixChangedObservable.add(() => {
+            // sending new camera position & rotation updates every 100 ms
+            // to avoid sending too frequent updates over the network
+            if (!remoteControlled && new Date().getTime() - lastTime >= updateFrequencies && presence.isInitialized) {
+                presence.update({
+                    cameraPosition: scene.activeCamera.position,
+                    cameraRotation: scene.activeCamera.rotation,
+                    picture: presence.data.picture,
+                });
+                lastTime = new Date().getTime();
+            }
+        });
+    
+        // Register listener for changes to presence
+        presence.on("presenceChanged", (userPresence, local) => {
+            // If it's not the local user
+            if (!local) {
+                // And if it's the first time this new user is sending data
+                if (!users[userPresence.userId]) {
+                    users[userPresence.userId] = {};
+                    console.log("new user is broadcasting, creating his local avatar.");
+                    let avatar = createAvatarBody(initialSceneCameraPosition, userPresence, hdrTexture);
+                    let label = createLabelForAvatar(avatar, userPresence, advancedTexture);
+    
+                    users[userPresence.userId].body = avatar.body;
+                    users[userPresence.userId].head = avatar.head;
+                    users[userPresence.userId].label = label;
+                }
+                else {
+                    console.dir(userPresence);
+                    if (presence.state === "online") {
+                        updateAvatarPositionAndRotation(userPresence);
+                        if (remoteControlled) {
+                            updateCameraPositionAndRotation(userPresence);
+                        }
+                    }
+                    else {
+                        console.log("User has left.");
+                    }
+                }
+            }
+        });
+    
+        window.setInterval(() => {
+            for (var user in users) {
+                if (presence.getPresenceForUser(user).state === "offline") {
+                    removeAvatar(presence.getPresenceForUser(user));
+                };
+            }
+        }, 2000);
+    }
+
+    // Creating a label on top of the cube with the name of the user
+    // This label can be seen through walls to easily see where 
+    // another user is in the scene
+    const createLabelForAvatar = (avatar, userPresence, advancedTexture) => {
+        console.log("Creating label for avatar: " + userPresence.displayName);
+        var rect = new BABYLON.GUI.Rectangle();
+        rect.width = 0.2;
+        rect.height = "40px";
+        rect.cornerRadius = 20;
+        rect.color = "white";
+        rect.thickness = 4;
+        rect.background = "black";
+        advancedTexture.addControl(rect);
+    
+        var label = new BABYLON.GUI.TextBlock();
+        /***********************/
+        // Live Share SDK data
+        /***********************/
+        label.text = userPresence.displayName;
+
+        rect.addControl(label);
+        rect.linkWithMesh(avatar.head);   
+        rect.linkOffsetY = -50;
+
+        return rect;
+    };
+
+    const updateAvatarPositionAndRotation = (userPresence) => {
+        // interpolating values from previous position to new one sent over websocket
+        // to create a smooth animation. We should get a new position every 100 ms
+        // which is approx 7 frames missing at 60 fps. 
+        BABYLON.Animation.CreateAndStartAnimation("avatarpos", 
+        users[userPresence.userId].body, 
+        "position", 60, framesToCompensate, 
+        users[userPresence.userId].body.position, 
+        new BABYLON.Vector3(userPresence.data.cameraPosition._x, userPresence.data.cameraPosition._y - 0.7, userPresence.data.cameraPosition._z), 0);
+
+        BABYLON.Animation.CreateAndStartAnimation("avatarpos", 
+                        users[userPresence.userId].head, 
+                        "position", 60, framesToCompensate, 
+                        users[userPresence.userId].head.position, 
+                        new BABYLON.Vector3(userPresence.data.cameraPosition._x, userPresence.data.cameraPosition._y, userPresence.data.cameraPosition._z), 0);
+    
+        BABYLON.Animation.CreateAndStartAnimation("camerarot", 
+            users[userPresence.userId].head, 
+            "rotation", 60, framesToCompensate, 
+            users[userPresence.userId].head.rotation, 
+            new BABYLON.Vector3(userPresence.data.cameraRotation._x, userPresence.data.cameraRotation._y, userPresence.data.cameraRotation._z), 0);                           
+    };
+
+    const updateCameraPositionAndRotation = (userPresence) => {
+        // interpolating values from previous position to new one sent over websocket
+        // to create a smooth animation. We should get a new position every 100 ms
+        // which is approx 7 frames missing at 60 fps. 
+        BABYLON.Animation.CreateAndStartAnimation("camerapos", 
+            scene.activeCamera, 
+            "position", 60, framesToCompensate, 
+            scene.activeCamera.position, 
+            new BABYLON.Vector3(userPresence.data.cameraPosition._x, userPresence.data.cameraPosition._y, userPresence.data.cameraPosition._z), 0);
+        
+        BABYLON.Animation.CreateAndStartAnimation("camerarot", 
+            scene.activeCamera, 
+            "rotation", 60, framesToCompensate, 
+            scene.activeCamera.rotation, 
+            new BABYLON.Vector3(userPresence.data.cameraRotation._x, userPresence.data.cameraRotation._y, userPresence.data.cameraRotation._z), 0);                           
+    };
 
     // Creating a super simple avatar for the user made of
     // a cylinder acting as the body with a cube on top acting
@@ -148,163 +450,14 @@ function renderStage(elem, presence, selected3DScene) {
         return { head: head, body: body}
     };
 
-    // Creating a label on top of the cube with the name of the user
-    // This label can be seen through walls to easily see where 
-    // another user is in the scene
-    const createLabelForAvatar = (avatar, userPresence, advancedTexture) => {
-        console.log("Creating label for avatar: " + userPresence.displayName);
-        var rect = new BABYLON.GUI.Rectangle();
-        rect.width = 0.2;
-        rect.height = "40px";
-        rect.cornerRadius = 20;
-        rect.color = "white";
-        rect.thickness = 4;
-        rect.background = "black";
-        advancedTexture.addControl(rect);
-    
-        var label = new BABYLON.GUI.TextBlock();
-        label.text = userPresence.displayName;
-        rect.addControl(label);
-    
-        rect.linkWithMesh(avatar.head);   
-        rect.linkOffsetY = -50;
-
-        return rect;
-    };
-
-    const updateAvatarPositionAndRotation = (userPresence) => {
-        // interpolating values from previous position to new one sent over websocket
-        // to create a smooth animation. We should get a new position every 100 ms
-        // which is approx 7 frames missing at 60 fps. 
-        BABYLON.Animation.CreateAndStartAnimation("avatarpos", 
-        users[userPresence.userId].body, 
-        "position", 60, framesToCompensate, 
-        users[userPresence.userId].body.position, 
-        new BABYLON.Vector3(userPresence.data.cameraPosition._x, userPresence.data.cameraPosition._y - 0.7, userPresence.data.cameraPosition._z), 0);
-
-        BABYLON.Animation.CreateAndStartAnimation("avatarpos", 
-                        users[userPresence.userId].head, 
-                        "position", 60, framesToCompensate, 
-                        users[userPresence.userId].head.position, 
-                        new BABYLON.Vector3(userPresence.data.cameraPosition._x, userPresence.data.cameraPosition._y, userPresence.data.cameraPosition._z), 0);
-    
-        BABYLON.Animation.CreateAndStartAnimation("camerarot", 
-            users[userPresence.userId].head, 
-            "rotation", 60, framesToCompensate, 
-            users[userPresence.userId].head.rotation, 
-            new BABYLON.Vector3(userPresence.data.cameraRotation._x, userPresence.data.cameraRotation._y, userPresence.data.cameraRotation._z), 0);                           
-    };
-
     const removeAvatar = (userPresence) => {
         users[userPresence.userId].head.dispose();
         users[userPresence.userId].body.dispose();
         users[userPresence.userId].label.dispose();
         delete users[userPresence.userId];
     }
-
-    const createScene = function () {
-            var scene = new BABYLON.Scene(engine);
-            var lastTime = new Date().getTime();
-            var baseURL;
-            var sceneFile;
-            let initialSceneCameraPosition;
-            let advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
-            let hdrTexture = new BABYLON.HDRCubeTexture("https://playground.babylonjs.com/textures/room.hdr", scene, 512);
-
-            switch (selectedSceneToRender) {
-                case "museum":
-                    baseURL = "https://www.babylonjs.com/Scenes/Espilit/";
-                    sceneFile = "Espilit.babylon";
-                    break;
-                case "wincafe":
-                    baseURL = "https://www.babylonjs.com/Scenes/WCafe/";
-                    sceneFile = "WCafe.babylon";
-                    break;
-                case "sponza":
-                        baseURL = "https://www.babylonjs.com/Scenes/Sponza/";
-                        sceneFile = "Sponza.babylon";
-                        break;
-                case "hillvalley":
-                            baseURL = "https://www.babylonjs.com/Scenes/HillValley/";
-                            sceneFile = "HillValley.incremental.babylon";
-                            break;
-                case "appartment":
-                default:
-                    baseURL = "https://www.babylonjs.com/Scenes/flat2009/";
-                    sceneFile = "flat2009.babylon";
-                    break;
-            }
-
-            // https://playground.babylonjs.com/#ZAUBTN
-            BABYLON.SceneLoader.Append(baseURL, sceneFile, scene, () => {
-                if (scene.activeCamera) {
-                    scene.activeCamera.ellipsoid = new BABYLON.Vector3(0.1, 0.6, 0.1);
-                    scene.activeCamera.position.y = 1.2;
-                    initialSceneCameraPosition = scene.activeCamera.position.clone();
-                    scene.activeCamera.attachControl(canvas);
-
-                    // Register listener for changes to presence
-                    presence.on("presenceChanged", (userPresence, local) => {
-                        // If it's not the local user
-                        if (!local) {
-                            // And if it's the first time this new user is sending data
-                            if (!users[userPresence.userId]) {
-                                users[userPresence.userId] = {};
-                                console.log("new user is broadcasting, creating his local avatar.");
-                                let avatar = createAvatarBody(initialSceneCameraPosition, userPresence, hdrTexture);
-                                let label = createLabelForAvatar(avatar, userPresence, advancedTexture);
-
-                                users[userPresence.userId].body = avatar.body;
-                                users[userPresence.userId].head = avatar.head;
-                                users[userPresence.userId].label = label;
-                            }
-                            else {
-                                console.dir(userPresence);
-                                if (presence.state === "online") {
-                                    console.log("Existing user.");
-                                    updateAvatarPositionAndRotation(userPresence);
-                                }
-                                else {
-                                    console.log("User has left.");
-                                }
-                            }
-                        }
-                    });
-
-                    // Start tracking presence
-                    presence.initialize({
-                        picture: defaultAvatarInformation.picture,
-                    });
-
-                    window.setInterval(() => {
-                        for (var user in users) {
-                            if (presence.getPresenceForUser(user).state === "offline") {
-                                removeAvatar(presence.getPresenceForUser(user));
-                            };
-                        }
-                    }, 2000);
-
-                    // Babylon.js event sent everytime the view matrix is changed
-                    // Useful to know either a position, a rotation or
-                    // both have been updated
-                    scene.activeCamera.onViewMatrixChangedObservable.add(() => {
-                        // sending new camera position & rotation updates every 100 ms
-                        // to avoid sending too frequent updates over the network
-                        if (new Date().getTime() - lastTime >= updateFrequencies && presence.isInitialized) {
-                             presence.update({
-                                cameraPosition: scene.activeCamera.position,
-                                cameraRotation: scene.activeCamera.rotation,
-                                picture: presence.data.picture,
-                            });
-                            lastTime = new Date().getTime();
-                        }
-                    });
-                }
-            });
-            return scene;
-    };
     
-    const scene = createScene(); //Call the createScene function
+    scene = createScene(); //Call the createScene function
 
     // Register a render loop to repeatedly render the scene
     engine.runRenderLoop(function () {
